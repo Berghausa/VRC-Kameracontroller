@@ -389,6 +389,8 @@ class Controller:
     def stop(self):
         self._repeat=False
         with self.operation:
+            # A running load may have re-armed repetition while Stop waited.
+            self._repeat=False
             self.send('/dolly/Play', False)
             self.requested = 'stop'
 

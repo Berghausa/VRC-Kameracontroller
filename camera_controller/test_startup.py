@@ -52,3 +52,14 @@ class StartupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'keine Fahrt'):c.play_slot(2)
         c.world=lambda:None
         with self.assertRaises(ValueError):c.play_slot(1)
+
+    def test_stop_still_disarms_if_loading_finishes_while_waiting(self):
+        c=self.c
+        class FinishingLoad:
+            def __enter__(self):c._repeat=True
+            def __exit__(self,*args):pass
+        c.operation=FinishingLoad()
+        c.send=Mock()
+        c.stop()
+        self.assertFalse(c._repeat)
+        c.send.assert_called_once_with('/dolly/Play',False)
