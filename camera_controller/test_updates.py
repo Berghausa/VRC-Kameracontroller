@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 import updates
 
-def release(tag='v1.1.0'):
+def release(tag='v99.0.0'):
     return {'tag_name':tag,'assets':[{'name':name,'browser_download_url':updates.PREFIX+tag+'/'+name} for name in (updates.INSTALLER,'SHA256SUMS.txt')]}
 
 class UpdatesTests(unittest.TestCase):

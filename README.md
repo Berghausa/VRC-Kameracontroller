@@ -32,6 +32,8 @@ Bestehende Daten: **Anleitung → Daten übernehmen**, bisherige `club_analytics
 
 ## Bitfocus Companion
 
+Ab Version 1.1 kann Companion auf einem lokalen Server laufen: **Anleitung → Companion-Server**, lokale IP des Kamera-PCs und IP des Servers eingeben und das Studio neu starten. Die angezeigte Base URL statt `127.0.0.1` verwenden. In jeder HTTP-Aktion den angezeigten `Authorization`-Header eintragen. Der Zugriff erfordert den Schlüssel und ist auf die konfigurierte Server-IP beschränkt. Das ist für das eigene lokale Netzwerk vorgesehen, nicht für eine öffentliche Internetfreigabe. Bei geänderter PC-IP muss die Zuordnung angepasst werden. Standardmäßig bleibt die API nur lokal erreichbar.
+
 Generic HTTP Requests, Base URL `http://127.0.0.1:8766`:
 
 | Aktion | Methode | URI |
@@ -40,7 +42,7 @@ Generic HTTP Requests, Base URL `http://127.0.0.1:8766`:
 | Stoppen | POST | `/api/stop` |
 | Status | GET | `/api/status` |
 
-Antwort enthält `playing`, `world_id`, `active_path_id`, `osc_connected`, `load_state`, `error` und `paths`. `active_path_id` ist die zuletzt gestartete Auswahl, kein unabhängiger Nachweis des in VRChat geladenen Inhalts. Status regelmäßig über einen Companion-Trigger abrufen und Antwortfelder als Variablen speichern. Die API ist nur auf demselben Rechner erreichbar.
+Antwort enthält `playing`, `world_id`, `active_path_id`, `osc_connected`, `load_state`, `error` und `paths`. `active_path_id` ist die zuletzt gestartete Auswahl, kein unabhängiger Nachweis des in VRChat geladenen Inhalts. Status regelmäßig über einen Companion-Trigger abrufen und Antwortfelder als Variablen speichern. Ohne Server-Einrichtung ist die API nur auf demselben Rechner erreichbar.
 
 ## Entwicklung und Releases
 

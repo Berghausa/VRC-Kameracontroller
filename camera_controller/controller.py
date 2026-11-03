@@ -12,6 +12,9 @@ import time
 import queue
 import math
 import sys
+import secrets
+import ipaddress
+import hmac
 from contextlib import contextmanager
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -161,6 +164,17 @@ class Controller:
             raise ValueError('Ungültiger OSC-Eingangsport')
         with self.connection() as c:
             c.execute('INSERT OR REPLACE INTO camera_settings VALUES(?,?)', ('osc_port', json.dumps(port)))
+
+    def configure_server(self, pc_ip, server_ip):
+        for value in (pc_ip,server_ip):
+            address=ipaddress.ip_address(value)
+            if address.version!=4 or not address.is_private or address.is_loopback or address.is_unspecified:
+                raise ValueError('Bitte eine lokale IPv4-Adresse eingeben, zum Beispiel 192.168.1.12.')
+        token=self.setting('api_token') or secrets.token_urlsafe(32)
+        with self.connection() as db:
+            for key,value in [('api_host',pc_ip),('companion_ip',server_ip),('api_token',token)]:
+                db.execute('INSERT OR REPLACE INTO camera_settings VALUES(?,?)',(key,json.dumps(value)))
+        return token
 
     def world(self):
         # A historical log must never unlock playback while VRChat is closed.
@@ -377,17 +391,36 @@ class Controller:
         if self.sock:
             self.sock.close()
 
-def api(controller, port):
+def api(controller, port, host='127.0.0.1'):
+    token=controller.setting('api_token') if host!='127.0.0.1' else None
+    allowed=controller.setting('companion_ip') if token else None
+    if host!='127.0.0.1' and not (token and allowed):
+        raise ValueError('Server-Verbindung zuerst einrichten: lokale IP, Companion-IP und Zugriffsschlüssel fehlen.')
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
+        def authorized(self):
+            if not token:
+                return True
+            peer=self.client_address[0]
+            if peer not in ('127.0.0.1',host,allowed):
+                self.reply(403,{'error':'Dieser Rechner ist nicht als Companion-Server freigegeben.'})
+                return False
+            provided=self.headers.get('Authorization','')
+            if not hmac.compare_digest(provided,'Bearer '+token):
+                self.reply(401,{'error':'Companion-Zugriffsschlüssel fehlt oder ist ungültig.'})
+                return False
+            return True
+
         def do_GET(self):
+            if not self.authorized():return
             if self.path != '/api/status':
                 return self.reply(404, {'error': 'Nicht gefunden'})
             self.reply(200, controller.status())
 
         def do_POST(self):
+            if not self.authorized():return
             # Companion uses POST without a body. Reject browser cross-origin calls.
             if self.headers.get('Origin'):
                 return self.reply(403, {'error': 'Browser-Ursprung nicht erlaubt'})
@@ -410,7 +443,7 @@ def api(controller, port):
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)
-    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
@@ -551,7 +584,24 @@ def gui(c, api_port):
                     messagebox.showerror('Datenübernahme',str(exc),parent=win)
         ttk.Button(bottom,text='Datenordner öffnen',command=open_data).pack(side='left')
         ttk.Button(bottom,text='Daten übernehmen',command=migrate).pack(side='left',padx=8)
+        ttk.Button(bottom,text='Companion-Server',command=server_setup).pack(side='left')
         ttk.Button(bottom,text='Schließen',command=win.destroy).pack(side='right')
+    def server_setup():
+        pc=simpledialog.askstring('Companion-Server','Lokale IP dieses Kamera-PCs:',initialvalue=c.setting('api_host','192.168.1.167'),parent=root)
+        if not pc:return
+        peer=simpledialog.askstring('Companion-Server','Lokale IP des Companion-Servers:',initialvalue=c.setting('companion_ip','192.168.1.12'),parent=root)
+        if not peer:return
+        try:
+            token=c.configure_server(pc.strip(),peer.strip())
+            win=tk.Toplevel(root);win.title('Companion-Verbindung')
+            box=ttk.Frame(win,padding=18);box.pack(fill='both',expand=True)
+            ttk.Label(box,text='Nach Neustart des Studios erreichbar unter:').pack(anchor='w')
+            ttk.Label(box,text=f'http://{pc.strip()}:{api_port}').pack(anchor='w',pady=8)
+            ttk.Label(box,text='HTTP-Header für Companion (Zugriffsschlüssel vertraulich behandeln):').pack(anchor='w')
+            entry=ttk.Entry(box,width=85);entry.pack(fill='x',pady=8)
+            entry.insert(0,json.dumps({'Authorization':'Bearer '+token}))
+            ttk.Label(box,text=f'Zugriff ist auf Server {peer.strip()} beschränkt. Studio danach neu starten.').pack(anchor='w')
+        except ValueError as exc:messagebox.showerror('Companion-Server',str(exc))
     def check_updates(manual=False):
         if update_busy.is_set():
             return
@@ -604,7 +654,7 @@ def gui(c, api_port):
     update_button=ttk.Button(toolbar,text='Updates',command=install_update)
     update_button.pack(side='right',padx=8)
     ttk.Label(frame,textvariable=status,wraplength=1000).pack(anchor='w',pady=(12,6),before=tree)
-    ttk.Label(frame,text=f'Companion · 127.0.0.1:{api_port}    /    OSC-Empfang · {c.receive_port}',font=('Segoe UI',9),foreground='#65738b').pack(anchor='w',before=tree)
+    ttk.Label(frame,text=f"Companion · {c.setting('api_host','127.0.0.1')}:{api_port}    /    OSC-Empfang · {c.receive_port}",font=('Segoe UI',9),foreground='#65738b').pack(anchor='w',before=tree)
     def monitor():
         while not quit_event.is_set():
             try:
@@ -698,6 +748,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--headless', action='store_true')
     parser.add_argument('--api-port', type=int, default=8766)
+    parser.add_argument('--api-host', default=None)
     parser.add_argument('--receive-port', type=int, default=9001)
     parser.add_argument('--logs', type=Path, default=DEFAULT_LOGS)
     parser.add_argument('--db', type=Path, default=DB)
@@ -713,7 +764,7 @@ def main():
     server = None
     try:
         try:
-            server = api(c,args.api_port)
+            server = api(c,args.api_port,host=args.api_host or c.setting('api_host','127.0.0.1'))
         except OSError:
             c.error = f'Companion-Port {args.api_port} belegt. Fenster bleibt bereit; andere Instanz schließen und Tool neu starten oder --api-port verwenden.'
             if args.headless:

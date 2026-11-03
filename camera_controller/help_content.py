@@ -40,9 +40,15 @@ Fahrt starten: POST /api/paths/ID/play  (ID steht in der Liste)
 Stoppen: POST /api/stop
 Status: GET /api/status
 
+Companion auf einem anderen Rechner: unten „Companion-Server“ öffnen.
+Die lokale IP des Kamera-PCs und des Companion-Servers eintragen, Studio neu
+starten. Die angezeigte Base URL und den Authorization-Header in allen
+Companion-Aktionen verwenden. Der Zugriff ist auf den gewählten Server begrenzt.
+Die Verbindung ist für das eigene lokale Netzwerk gedacht.
+
 Statusfelder: playing, world_id, active_path_id, osc_connected, load_state, error.
 Für Anzeigen den Status regelmäßig abrufen und Felder in Companion-Variablen
-übernehmen. Companion und Studio müssen auf demselben PC laufen.
+übernehmen. Ohne Server-Einrichtung sind die Endpunkte nur lokal erreichbar.
 
 UPDATES
 
