@@ -32,8 +32,9 @@ def osc(address, value=None):
     def string(s):
         b = s.encode('utf-8') + b'\0'
         return b + b'\0' * (-len(b) % 4)
-    tag = ',' if value is None else ',T' if value is True else ',F' if value is False else ',s'
-    return string(address) + string(tag) + (string(value) if isinstance(value, str) else b'')
+    tag = ',' if value is None else ',T' if value is True else ',F' if value is False else ',i' if isinstance(value,int) else ',s'
+    body=string(value) if isinstance(value,str) else struct.pack('>i',value) if type(value) is int else b''
+    return string(address) + string(tag) + body
 
 def decode(data):
     def string(offset):
@@ -101,6 +102,13 @@ class Controller:
         self.exported_file = None
         self.exported_at = 0
         self.load_state = 'idle'
+        self.camera_mode = None
+        self.spout_active = None
+        self.camera_confirmed_at = 0
+        self._repeat = False
+        self._repeat_world = None
+        self._repeat_seen_play = False
+        self._repeat_sent_at = 0
         self.db.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as c:
             c.executescript('''CREATE TABLE IF NOT EXISTS camera_schema(version INTEGER PRIMARY KEY);
@@ -111,6 +119,7 @@ class Controller:
         self.sock = None
         self.bind_socket()
         threading.Thread(target=self.receive, daemon=True).start()
+        threading.Thread(target=self.repeat_worker,daemon=True).start()
 
     def bind_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -164,6 +173,62 @@ class Controller:
             raise ValueError('Ungültiger OSC-Eingangsport')
         with self.connection() as c:
             c.execute('INSERT OR REPLACE INTO camera_settings VALUES(?,?)', ('osc_port', json.dumps(port)))
+
+    def set_setting(self,key,value):
+        with self.connection() as db:
+            db.execute('INSERT OR REPLACE INTO camera_settings VALUES(?,?)',(key,json.dumps(value)))
+        if key=='repeat_playback' and not value:self._repeat=False
+
+    def prepare_camera(self):
+        if not self.setting('prepare_camera',True):return
+        self.load_state='preparing_camera'
+        before=time.time()
+        self.send('/usercamera/Mode',2)
+        if self.closed.wait(.25):raise ValueError('Controller wird geschlossen.')
+        self.send('/usercamera/Streaming',True)
+        deadline=time.monotonic()+4
+        while time.monotonic()<deadline:
+            if self.camera_confirmed_at>=before and self.camera_mode==2 and self.spout_active is True:return
+            if self.closed.wait(.05):break
+        raise ValueError('Kamera/Spout nicht bestätigt. Kamera in VRChat öffnen und OSC prüfen.')
+
+    def repeat_worker(self):
+        while not self.closed.wait(.75):
+            try:self.repeat_tick()
+            except Exception as exc:
+                self._repeat=False
+                self.error=f'Wiederholung pausiert: {exc}'
+
+    def repeat_tick(self):
+        if not self._repeat:return
+        if not self.operation.acquire(blocking=False):return
+        try:
+            if not self._repeat:return
+            if self.world()!=self._repeat_world:
+                self._repeat=False
+                return
+            if not self.feedback_at or time.time()-self.feedback_at>15:
+                self._repeat=False
+                self.error='Wiederholung pausiert: keine aktuelle Kamerarückmeldung.'
+                return
+            if self.feedback_at<self._repeat_sent_at:return
+            if self.playing is True:
+                self._repeat_seen_play=True
+            elif self.playing is False and self._repeat_seen_play:
+                self._repeat_sent_at=time.time()
+                self._repeat_seen_play=False
+                self.send('/dolly/Play',True)
+            elif time.time()-self._repeat_sent_at>5:
+                self._repeat=False
+                self.error='Wiederholung pausiert: Start nicht bestätigt.'
+        finally:self.operation.release()
+
+    def play_slot(self,slot):
+        world=self.world()
+        available=[p for p in self.paths() if world and p['world_id']==world]
+        if not 1<=slot<=len(available):
+            raise ValueError('Für diesen Platz ist in der aktuellen Welt keine Fahrt gespeichert.')
+        self.play(available[slot-1]['id'])
 
     def configure_server(self, pc_ip, server_ip):
         for value in (pc_ip,server_ip):
@@ -316,11 +381,13 @@ class Controller:
                         receive_port=self.receive_port, discovery_error=self.discovery_error,
                         query_received_at=self.query_at,
                         load_state=self.load_state,
+                        camera_mode=self.camera_mode,spout_active=self.spout_active,repeat_enabled=self._repeat,
                         feedback_at=self.feedback_at, requested=self.requested, error=self.error,
                         configured=self.setting('osc_port') is not None,
                         paths=[dict(p, available=bool(world and p['world_id'] == world)) for p in self.paths()])
 
     def stop(self):
+        self._repeat=False
         with self.operation:
             self.send('/dolly/Play', False)
             self.requested = 'stop'
@@ -349,6 +416,7 @@ class Controller:
         if not self.operation.acquire(blocking=False):
             raise ValueError('Eine andere Fahrt wird gerade geladen.')
         try:
+            self._repeat=False
             self.load_state='stopping'
             with self.connection() as c:
                 row = c.execute('SELECT * FROM camera_paths WHERE id=?', (int(path_id),)).fetchone()
@@ -359,6 +427,7 @@ class Controller:
             world = self.world()
             if not world or row['world_id'] != world:
                 raise ValueError('Start gesperrt: aktuelle Welt unbekannt oder unpassend.')
+            self.prepare_camera()
             before = time.time()
             self.send('/dolly/Play', False)
             # Do not import into a possibly still playing camera. Require feedback.
@@ -374,10 +443,15 @@ class Controller:
             self.import_path(row,world)
             if self.world() != world:
                 raise ValueError('Welt während des Ladens gewechselt.')
+            self._repeat_sent_at=time.time()
             self.send('/dolly/Play', True)
             self.active, self.requested, self.error = row['id'], 'play', ''
+            self._repeat_world=world
+            self._repeat_seen_play=False
+            self._repeat=self.setting('repeat_playback',True)
             self.load_state='started'
         except Exception as exc:
+            self._repeat=False
             self.error = str(exc)
             self.load_state='failed'
             raise
@@ -385,6 +459,7 @@ class Controller:
             self.operation.release()
 
     def close(self):
+        self._repeat=False
         self.closed.set()
         if self.advertisement:
             self.advertisement.close()
@@ -429,6 +504,8 @@ def api(controller, port, host='127.0.0.1'):
                     controller.stop()
                 elif re.fullmatch(r'/api/paths/\d+/play', self.path):
                     controller.play(int(self.path.split('/')[3]))
+                elif re.fullmatch(r'/api/slots/\d+/play', self.path):
+                    controller.play_slot(int(self.path.split('/')[3]))
                 else:
                     return self.reply(404, {'error': 'Nicht gefunden'})
                 self.reply(200, controller.status())
@@ -653,6 +730,13 @@ def gui(c, api_port):
     ttk.Button(toolbar,text='Anleitung',command=help_window).pack(side='right')
     update_button=ttk.Button(toolbar,text='Updates',command=install_update)
     update_button.pack(side='right',padx=8)
+    startup_options=ttk.Frame(frame)
+    startup_options.pack(fill='x',before=tree,pady=(8,0))
+    prepare_var=tk.BooleanVar(value=c.setting('prepare_camera',True))
+    repeat_var=tk.BooleanVar(value=c.setting('repeat_playback',True))
+    ttk.Checkbutton(startup_options,text='Kamera + Spout beim Start vorbereiten',variable=prepare_var,command=lambda:c.set_setting('prepare_camera',prepare_var.get())).pack(side='left')
+    ttk.Checkbutton(startup_options,text='Fahrt wiederholen',variable=repeat_var,command=lambda:c.set_setting('repeat_playback',repeat_var.get())).pack(side='left',padx=16)
+    ttk.Label(frame,text='Welt-Verankerung einmal in VRChat wählen; dafür bietet OSC keinen Umschaltbefehl.',font=('Segoe UI',9),foreground='#a6b4cd').pack(anchor='w',before=tree)
     ttk.Label(frame,textvariable=status,wraplength=1000).pack(anchor='w',pady=(12,6),before=tree)
     ttk.Label(frame,text=f"Companion · {c.setting('api_host','127.0.0.1')}:{api_port}    /    OSC-Empfang · {c.receive_port}",font=('Segoe UI',9),foreground='#65738b').pack(anchor='w',before=tree)
     def monitor():
@@ -702,7 +786,7 @@ def gui(c, api_port):
                 variables['connection'].set('● OSC verbunden' if connected else '● Warte auf OSC' if s['vrchat_running'] else '○ VRChat geschlossen')
                 wid=s['world_id']
                 variables['world'].set(s['world_names'].get(wid,'Welt erkannt') if wid else 'Welt wird geladen …' if s['vrchat_running'] else 'Noch keine Welt')
-                loading={'stopping':'Fahrt wird gestoppt …','importing':'Auswahl wird geladen …','verifying':'Geladene Fahrt prüfen …'}
+                loading={'preparing_camera':'Kamera + Spout öffnen …','stopping':'Fahrt wird gestoppt …','importing':'Auswahl wird geladen …','verifying':'Geladene Fahrt prüfen …'}
                 variables['playback'].set(loading.get(s['load_state']) or ('▶ Fahrt läuft' if s['playing'] is True else '■ Gestoppt' if s['playing'] is False else 'Warte auf Status' if s['vrchat_running'] else 'Studio bereit'))
                 if s['transport_error'] or s['error'] or s['discovery_error']:
                     status.set(s['transport_error'] or s['error'] or s['discovery_error'])

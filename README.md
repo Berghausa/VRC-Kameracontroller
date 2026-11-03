@@ -12,6 +12,10 @@ Python ist nicht erforderlich. Alternativ funktioniert die eigenständige `VRC-K
 
 ## Erste Fahrt
 
+Ab Version 1.2 bereitet der Controller beim Start automatisch den Stream-Kameramodus und Spout vor und prüft die Rückmeldung. „Fahrt wiederholen“ startet eine beendete Fahrt erneut, solange das Studio läuft. Beide Funktionen sind im Fenster abschaltbar und standardmäßig aktiv. Stoppen im Studio oder über Companion beendet die Wiederholung; ein direkter VRChat-Stopp ist für den Controller nicht vom normalen Fahrtende unterscheidbar. Bei Weltwechsel oder fehlenden Rückmeldungen wird die Wiederholung deaktiviert. Zwischen Wiederholungen kann eine kurze Pause entstehen.
+
+Die native Kamera-Verankerung **Welt** muss einmal in VRChat eingestellt werden. Die verfügbare OSC-Schnittstelle bietet dafür keinen Befehl. Der Controller erhält die Koordinaten der gespeicherten Fahrt; er rechnet relative Punkte nicht in absolute Koordinaten um.
+
 In VRChat VRC+ und OSC aktivieren. Eine Dolly-Fahrt erstellen und als JSON exportieren. Im Studio **Fahrt hinzufügen**, Datei auswählen, Namen und Welt zuordnen. Danach die Fahrt in der passenden Welt starten. Das Studio bleibt ohne VRChat offen und verbindet sich automatisch. Ein bestehender OSC-Router kann parallel laufen.
 
 Der Controller stoppt vor einem Wechsel die alte Fahrt und lädt die neue über einen Dateipfad. Es entstehen **keine automatischen Kontroll-Exporte** im VRChat-Ordner. Eine feste interne Importdatei pro Fahrt wird wiederverwendet. VRChat bestätigt einen Import nicht direkt; vor Play wird eine Sekunde gewartet.
@@ -41,6 +45,8 @@ Generic HTTP Requests, Base URL `http://127.0.0.1:8766`:
 | Fahrt 1 starten | POST | `/api/paths/1/play` |
 | Stoppen | POST | `/api/stop` |
 | Status | GET | `/api/status` |
+
+Weltabhängige Tasten: `POST /api/slots/1/play`, entsprechend `/2/play` und `/3/play`. Die Plätze beziehen sich auf die nach Name/ID sortierten Fahrten der aktuellen Welt. Ein leerer Platz wird abgelehnt. In Companion die Beschriftung mit `arrayFilter($(custom:kamera_status)['paths'] ?? [], p => p.available)[0]?.name ?? 'Keine Fahrt'` aus derselben Auswahl beziehen (Index 0 für Platz 1). Die Startvorbereitung und Wiederholung erfolgen zentral im Controller, unabhängig davon, welche Schnittstelle den Start auslöst.
 
 Antwort enthält `playing`, `world_id`, `active_path_id`, `osc_connected`, `load_state`, `error` und `paths`. `active_path_id` ist die zuletzt gestartete Auswahl, kein unabhängiger Nachweis des in VRChat geladenen Inhalts. Status regelmäßig über einen Companion-Trigger abrufen und Antwortfelder als Variablen speichern. Ohne Server-Einrichtung ist die API nur auf demselben Rechner erreichbar.
 

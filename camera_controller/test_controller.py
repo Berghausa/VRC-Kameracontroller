@@ -94,6 +94,8 @@ class Tests(unittest.TestCase):
                 source.write_text('[{"IsLocal":false,"Position":{"X":1}}]')
                 ident=c.register('Broken import',source,W)
                 c.configure(9000)
+                c.set_setting('prepare_camera',False)
+                c.set_setting('repeat_playback',False)
                 c.world=lambda:W
                 sent=[]
                 def send(address,value=None):
@@ -120,6 +122,8 @@ class Tests(unittest.TestCase):
             receiver.settimeout(3)
             try:
                 c.configure(receiver.getsockname()[1])
+                c.set_setting('prepare_camera',False)
+                c.set_setting('repeat_playback',False)
                 source = Path(tmp)/'path.json'
                 original='[{"IsLocal":false,"Position":{"X":1,"Y":2,"Z":3},"Index":0,"PathIndex":0}]'
                 source.write_text(original)

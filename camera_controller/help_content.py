@@ -13,6 +13,18 @@ HELP = '''SCHNELLSTART
    Nur Fahrten für die aktuell erkannte Welt können gestartet werden.
    „Stopp“ beendet die Wiedergabe. Beim Wechsel entstehen keine Kontroll-Exporte.
 
+Beim Start öffnet das Studio den Stream-Kameramodus und aktiviert Spout.
+Die Rückmeldung wird geprüft. Über die Häkchen im Hauptfenster lassen sich
+Kamera-Vorbereitung und Wiederholung ausschalten.
+Die Wiederholung startet eine beendete Fahrt erneut, solange das Studio läuft.
+Zum dauerhaften Stoppen „Stopp“ im Studio oder in Companion verwenden.
+Auch ein Stopp direkt in VRChat kann sonst als Fahrtende erkannt werden.
+Weltwechsel oder fehlende Rückmeldungen beenden die automatische Wiederholung.
+
+WICHTIG: Die Kamera-Verankerung „Welt“ einmal in VRChat einstellen. Dafür gibt
+es in der aktuellen OSC-Schnittstelle keinen Umschaltbefehl. Gespeicherte
+Weltkoordinaten werden unverändert übernommen; lokale Punkte nicht umgerechnet.
+
 VERBINDUNG
 
 „OSC verbunden“ bestätigt aktuelle Rückmeldungen oder eine erfolgreiche
@@ -37,6 +49,7 @@ BITFOCUS COMPANION
 Verbindung: Generic HTTP Requests
 Base URL: http://127.0.0.1:8766
 Fahrt starten: POST /api/paths/ID/play  (ID steht in der Liste)
+Weltabhängiger Platz: POST /api/slots/1/play (Plätze 1, 2, 3 …)
 Stoppen: POST /api/stop
 Status: GET /api/status
 

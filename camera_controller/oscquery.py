@@ -84,6 +84,15 @@ class Advertisement:
                         host=json.load(response)
                     if not host.get('NAME','').startswith('VRChat-Client'):
                         continue
+                    with urllib.request.urlopen(base+'/usercamera',timeout=1) as response:
+                        camera=json.load(response).get('CONTENTS',{})
+                    mode=camera.get('Mode',{}).get('VALUE',[None])[0]
+                    streaming=camera.get('Streaming',{}).get('VALUE',[None])[0]
+                    if type(mode) is int and isinstance(streaming,bool):
+                        with self.controller.lock:
+                            self.controller.camera_mode=mode
+                            self.controller.spout_active=streaming
+                            self.controller.camera_confirmed_at=time.time()
                     with urllib.request.urlopen(base+'/dolly/Play',timeout=1) as response:
                         node=json.load(response)
                     value=node.get('VALUE',[None])[0]
