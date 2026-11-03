@@ -1,0 +1,2 @@
+-r camera_controller/requirements.txt
+pyinstaller==6.22.3

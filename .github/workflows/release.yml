@@ -1,0 +1,35 @@
+name: Windows release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-build.txt
+      - run: python -m unittest discover -s camera_controller -p 'test_*.py'
+      - name: Check version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = python -c "import sys;sys.path.insert(0,'camera_controller');from version import VERSION;print(VERSION)"
+          if ("v$version" -ne '${{ github.ref_name }}') { throw 'Version/tag mismatch' }
+      - shell: pwsh
+        run: ./build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Paket
+          path: release/*
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release create '${{ github.ref_name }}' release/* --title 'VRC Kameracontroller ${{ github.ref_name }}' --generate-notes
